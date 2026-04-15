@@ -1,0 +1,133 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// VALIDACIÓN Y LIMPIEZA DE DATOS - VERSIÓN CORREGIDA\n// ============================================\n\nconst items = $input.all();\nconst processedItems = [];\nconst errors = [];\n\nconsole.log(`\\n${'='.repeat(60)}`);\nconsole.log(`📊 INICIANDO PROCESAMIENTO DE ${items.length} REGISTRO(S)`);\nconsole.log(`${'='.repeat(60)}\\n`);\n\n// Función para convertir número serial de Google Sheets a fecha\nfunction convertirSerialAFecha(serial) {\n  // Google Sheets cuenta desde 1899-12-30 (pero considera 1900-01-01 como día 1)\n  // Hay que restar 1 porque JavaScript cuenta desde 1970-01-01\n  const diasDesde1900 = parseInt(serial);\n  \n  // Fecha base de Google Sheets: 30 de diciembre de 1899\n  const fechaBase = new Date(1899, 11, 30);\n  \n  // Sumar los días\n  const fechaResultado = new Date(fechaBase.getTime() + diasDesde1900 * 24 * 60 * 60 * 1000);\n  \n  return fechaResultado;\n}\n\n// Función para formatear fecha en YYYY/MM/DD\nfunction formatearFecha(fecha) {\n  const year = fecha.getFullYear();\n  const month = String(fecha.getMonth() + 1).padStart(2, '0');\n  const day = String(fecha.getDate()).padStart(2, '0');\n  return `${year}/${month}/${day}`;\n}\n\n// Campos obligatorios\nconst CAMPOS_OBLIGATORIOS = [\n  'Numero documento',\n  'Tipo documento',\n  'Nombre',\n  'Apellidos',\n  'Fecha de nacimiento',\n  'Sexo',\n  'Tipo de Sangre',\n  'Dirección de residencia (Especificar la ciudad)',\n  'Sede',\n  'Numero de Telefono Celular',\n  'E-mail personal',\n  'Cargo',\n  'Empresa a la que perteneces',\n  'EPS'\n];\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  const json = item.json;\n  const rowNumber = i + 1;\n  \n  console.log(`\\n${'─'.repeat(60)}`);\n  console.log(`🔍 PROCESANDO REGISTRO ${rowNumber}/${items.length}`);\n  console.log(`${'─'.repeat(60)}`);\n  \n  try {\n    // =========================\n    // 1. VALIDAR CAMPOS VACÍOS\n    // =========================\n    const camposFaltantes = [];\n    \n    for (const campo of CAMPOS_OBLIGATORIOS) {\n      const valor = json[campo];\n      const valorStr = valor?.toString().trim() || '';\n      \n      if (!valor || valorStr === '') {\n        camposFaltantes.push(campo);\n        console.log(`   ❌ \"${campo}\": VACÍO o NO EXISTE`);\n      } else {\n        const preview = valorStr.substring(0, 50);\n        console.log(`   ✅ \"${campo}\": \"${preview}${valorStr.length > 50 ? '...' : ''}\"`);\n      }\n    }\n    \n    if (camposFaltantes.length > 0) {\n      const error = `Faltan ${camposFaltantes.length} campo(s): ${camposFaltantes.join(', ')}`;\n      console.log(`\\n   ⚠️  RESULTADO: RECHAZADO - ${error}\\n`);\n      errors.push({ \n        row: rowNumber, \n        error, \n        campos_faltantes: camposFaltantes\n      });\n      continue;\n    }\n\n    // =========================\n    // 2. LIMPIEZA DE CÉDULA\n    // =========================\n    const rawCedula = json['Numero documento'];\n    const cedulaLimpia = rawCedula.toString().replace(/\\D/g, '');\n    \n    console.log(`   🆔 Cédula: \"${rawCedula}\" → \"${cedulaLimpia}\" (${cedulaLimpia.length} dígitos)`);\n    \n    if (cedulaLimpia.length < 6 || cedulaLimpia.length > 12) {\n      const error = `Cédula inválida - longitud: ${cedulaLimpia.length} (debe ser 6-12)`;\n      console.log(`   ❌ ${error}`);\n      errors.push({ row: rowNumber, error, cedula: rawCedula });\n      continue;\n    }\n\n    // =========================\n    // 3. CONVERSIÓN Y LIMPIEZA DE FECHA\n    // =========================\n    const rawFecha = json['Fecha de nacimiento'];\n    let fechaLimpia = null;\n    \n    console.log(`   📅 Fecha raw: \"${rawFecha}\" (tipo: ${typeof rawFecha})`);\n    \n    if (rawFecha) {\n      const fechaStr = rawFecha.toString().trim();\n      \n      // CASO 1: Si es un número (serial de Google Sheets)\n      if (!isNaN(fechaStr) && !fechaStr.includes('/') && !fechaStr.includes('-')) {\n        const serial = parseInt(fechaStr);\n        console.log(`   📅 Detectado como número serial: ${serial}`);\n        \n        // Validar que el serial esté en un rango razonable\n        // 1 = 1900-01-01, 73050 = 2099-12-31 (aprox)\n        if (serial < 1 || serial > 73050) {\n          const error = `Serial de fecha fuera de rango: ${serial}`;\n          console.log(`   ❌ ${error}`);\n          errors.push({ row: rowNumber, error, fecha: rawFecha });\n          continue;\n        }\n        \n        const fechaObj = convertirSerialAFecha(serial);\n        fechaLimpia = formatearFecha(fechaObj);\n        \n        console.log(`   ✅ Serial ${serial} convertido a: ${fechaLimpia}`);\n        console.log(`   📅 Fecha legible: ${fechaObj.toLocaleDateString('es-CO', { \n          year: 'numeric', \n          month: 'long', \n          day: 'numeric' \n        })}`);\n      }\n      // CASO 2: Si viene como texto en formato DD/MM/YYYY o similar\n      else {\n        let partes = null;\n        \n        if (fechaStr.includes('/')) {\n          partes = fechaStr.split('/');\n        } else if (fechaStr.includes('-')) {\n          partes = fechaStr.split('-');\n        }\n        \n        console.log(`   📅 Detectado como texto, partes: ${partes ? partes.join(' | ') : 'NO SE PUDO DIVIDIR'}`);\n        \n        if (partes && partes.length === 3) {\n          let dd, mm, yyyy;\n          \n          // Detectar formato\n          if (partes[2].length === 4) {\n            // DD/MM/YYYY\n            dd = partes[0].padStart(2, '0');\n            mm = partes[1].padStart(2, '0');\n            yyyy = partes[2];\n          } else if (partes[0].length === 4) {\n            // YYYY/MM/DD\n            yyyy = partes[0];\n            mm = partes[1].padStart(2, '0');\n            dd = partes[2].padStart(2, '0');\n          } else {\n            // DD/MM/YY\n            dd = partes[0].padStart(2, '0');\n            mm = partes[1].padStart(2, '0');\n            yyyy = partes[2].length === 2 ? (parseInt(partes[2]) > 50 ? '19' + partes[2] : '20' + partes[2]) : partes[2];\n          }\n          \n          console.log(`   📅 Interpretado: día=${dd}, mes=${mm}, año=${yyyy}`);\n          \n          // Validar rangos\n          const diaNum = parseInt(dd);\n          const mesNum = parseInt(mm);\n          const anioNum = parseInt(yyyy);\n          \n          if (diaNum < 1 || diaNum > 31) {\n            const error = `Día inválido: ${diaNum}`;\n            console.log(`   ❌ ${error}`);\n            errors.push({ row: rowNumber, error, fecha: rawFecha });\n            continue;\n          }\n          \n          if (mesNum < 1 || mesNum > 12) {\n            const error = `Mes inválido: ${mesNum}`;\n            console.log(`   ❌ ${error}`);\n            errors.push({ row: rowNumber, error, fecha: rawFecha });\n            continue;\n          }\n          \n          const anioActual = new Date().getFullYear();\n          if (anioNum < 1900 || anioNum > anioActual) {\n            const error = `Año inválido: ${anioNum} (debe estar entre 1900-${anioActual})`;\n            console.log(`   ❌ ${error}`);\n            errors.push({ row: rowNumber, error, fecha: rawFecha });\n            continue;\n          }\n          \n          fechaLimpia = `${yyyy}/${mm}/${dd}`;\n          console.log(`   ✅ Fecha limpia: ${fechaLimpia}`);\n          \n        } else {\n          const error = `Formato de fecha no reconocido: \"${rawFecha}\"`;\n          console.log(`   ❌ ${error}`);\n          errors.push({ row: rowNumber, error, fecha: rawFecha });\n          continue;\n        }\n      }\n      \n      // Validar que la fecha no sea futura ni muy antigua\n      const fechaObj = new Date(fechaLimpia);\n      const hoy = new Date();\n      const fecha1900 = new Date('1900-01-01');\n      \n      if (fechaObj > hoy) {\n        const error = 'Fecha de nacimiento no puede ser futura';\n        console.log(`   ❌ ${error}`);\n        errors.push({ row: rowNumber, error, fecha: fechaLimpia });\n        continue;\n      }\n      \n      if (fechaObj < fecha1900) {\n        const error = 'Fecha de nacimiento demasiado antigua (antes de 1900)';\n        console.log(`   ❌ ${error}`);\n        errors.push({ row: rowNumber, error, fecha: fechaLimpia });\n        continue;\n      }\n      \n    } else {\n      const error = 'Fecha de nacimiento vacía';\n      console.log(`   ❌ ${error}`);\n      errors.push({ row: rowNumber, error });\n      continue;\n    }\n\n    // =========================\n    // 4. VALIDAR EMAIL\n    // =========================\n    const email = json['E-mail personal'];\n    const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n    if (!emailRegex.test(email)) {\n      console.log(`   ⚠️  Email con formato inusual: \"${email}\"`);\n    } else {\n      console.log(`   ✅ Email válido: \"${email}\"`);\n    }\n\n    // =========================\n    // 5. VALIDAR SEXO\n    // =========================\n    const sexo = json['Sexo']?.toString().toUpperCase().trim();\n    console.log(`   👤 Sexo: \"${sexo}\"`);\n    \n    if (!['M', 'F', 'MASCULINO', 'FEMENINO', 'HOMBRE', 'MUJER'].includes(sexo)) {\n      const error = `Sexo inválido: \"${sexo}\"`;\n      console.log(`   ❌ ${error}`);\n      errors.push({ row: rowNumber, error, sexo });\n      continue;\n    }\n\n    // =========================\n    // 6. VALIDAR TIPO DE SANGRE\n    // =========================\n    const tipoSangre = json['Tipo de Sangre']?.toString().toUpperCase().trim();\n    const tiposValidos = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];\n    console.log(`   🩸 Tipo de sangre: \"${tipoSangre}\"`);\n    \n    if (!tiposValidos.includes(tipoSangre)) {\n      console.log(`   ⚠️  Tipo de sangre no estándar: \"${tipoSangre}\"`);\n    }\n\n    // =========================\n    // 7. LIMPIAR TELÉFONO\n    // =========================\n    const telefonoRaw = json['Numero de Telefono Celular'];\n    const telefonoLimpio = telefonoRaw.toString()\n      .replace(/\\(/g, '')\n      .replace(/\\)/g, '')\n      .replace(/-/g, '')\n      .replace(/\\s/g, '')\n      .replace(/\\+/g, '')\n      .trim();\n    \n    console.log(`   📱 Teléfono: \"${telefonoRaw}\" → \"${telefonoLimpio}\" (${telefonoLimpio.length} dígitos)`);\n\n    // =========================\n    // 8. VALIDAR CAMPOS DE REFERENCIA\n    // =========================\n    const tipoDoc = json['Tipo documento']?.toString().trim();\n    const cargo = json['Cargo']?.toString().trim();\n    const empresa = json['Empresa a la que perteneces']?.toString().trim();\n    const eps = json['EPS']?.toString().trim();\n    \n    console.log(`   📋 Tipo Doc: \"${tipoDoc}\"`);\n    console.log(`   💼 Cargo: \"${cargo}\"`);\n    console.log(`   🏢 Empresa: \"${empresa}\"`);\n    console.log(`   🏥 EPS: \"${eps}\"`);\n\n    // =========================\n    // 9. ITEM VALIDADO Y LIMPIO\n    // =========================\n    processedItems.push({\n      json: {\n        ...json,\n        cedula_limpia: cedulaLimpia,\n        fecha_nacimiento_limpia: fechaLimpia,\n        telefono_limpio: telefonoLimpio,\n        _validado: true,\n        _row_number: rowNumber,\n        _processed_at: new Date().toISOString()\n      }\n    });\n    \n    console.log(`\\n   ✅ RESULTADO: APROBADO - ${json.Nombre} ${json.Apellidos} (${cedulaLimpia})\\n`);\n\n  } catch (err) {\n    const error = `Error inesperado: ${err.message}`;\n    console.log(`\\n   💥 ${error}`);\n    errors.push({ row: rowNumber, error, exception: err.toString() });\n  }\n}\n\n// =========================\n// RESUMEN FINAL\n// =========================\nconsole.log('\\n' + '='.repeat(60));\nconsole.log(`📊 RESUMEN FINAL`);\nconsole.log('='.repeat(60));\nconsole.log(`✅ Registros APROBADOS: ${processedItems.length}`);\nconsole.log(`❌ Registros RECHAZADOS: ${errors.length}`);\nconsole.log(`📝 Total procesados: ${items.length}`);\n\nif (errors.length > 0) {\n  console.log('\\n❌ ERRORES:');\n  errors.forEach((e, idx) => {\n    console.log(`   ${idx + 1}. Fila ${e.row}: ${e.error}`);\n  });\n}\n\nconsole.log('='.repeat(60) + '\\n');\n\nif (processedItems.length === 0) {\n  throw new Error(`No hay registros válidos. ${errors.length} error(es) encontrado(s).`);\n}\n\nreturn processedItems;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        272
+      ],
+      "id": "468a6671-916d-460d-ac5c-9da24e3083c8",
+      "name": "Clean & Validate All Data"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- ===============================\n--  DECLARACIÓN DE VARIABLES\n-- ===============================\nDECLARE \n  @NumeroDocumento BIGINT,\n  @TipoDocumentoID INT,\n  @Nombre NVARCHAR(50),\n  @Apellidos NVARCHAR(50),\n  @FechaNacimiento DATETIME,\n  @SexoTexto NVARCHAR(10),\n  @RH NVARCHAR(3),\n  @Direccion NVARCHAR(100),\n  @Ciudad NVARCHAR(50),\n  @NumeroTelefono NVARCHAR(20),\n  @Email NVARCHAR(100),\n  @CargoID INT,\n  @EmpresaID INT,\n  @EPS NVARCHAR(50),\n  @AFP NVARCHAR(50),\n  @IDSupervisor INT,\n  @CreatedTime DATETIME,\n  @ErrorMsg NVARCHAR(500),\n  @RowNumber INT;\n\n-- ===============================\n--  ASIGNACIÓN DE VALORES\n-- ===============================\nBEGIN TRY\n  SET @RowNumber = {{ $json._row_number }};\n  SET @NumeroDocumento = TRY_CAST('{{ $json.cedula_limpia }}' AS BIGINT);\n  \n  -- Validar que la cédula se convirtió correctamente\n  IF @NumeroDocumento IS NULL OR @NumeroDocumento = 0\n    THROW 50001, 'Cédula no válida o es cero', 1;\n  \n  -- Obtener IDs de tablas relacionadas con manejo de errores detallado\n  SET @TipoDocumentoID = (\n    SELECT TOP 1 ID \n    FROM TipoDocumento \n    WHERE UPPER(LTRIM(RTRIM(Descripcion))) = UPPER(LTRIM(RTRIM('{{ $json[\"Tipo documento\"] }}')))\n  );\n  \n  SET @CargoID = (\n    SELECT TOP 1 ID \n    FROM Cargo \n    WHERE UPPER(LTRIM(RTRIM(Descripcion))) = UPPER(LTRIM(RTRIM('{{ $json.Cargo }}')))\n  );\n  \n  SET @EmpresaID = (\n    SELECT TOP 1 ID \n    FROM Empresa \n    WHERE UPPER(LTRIM(RTRIM(Nombre))) = UPPER(LTRIM(RTRIM('{{ $json[\"Empresa a la que perteneces\"] }}')))\n  );\n  \n  -- Validar que existen los registros relacionados\n  IF @TipoDocumentoID IS NULL\n    THROW 50002, 'Tipo de documento no encontrado en la base de datos: {{ $json[\"Tipo documento\"] }}', 1;\n  IF @CargoID IS NULL\n    THROW 50003, 'Cargo no encontrado en la base de datos: {{ $json.Cargo }}', 1;\n  IF @EmpresaID IS NULL\n    THROW 50004, 'Empresa no encontrada en la base de datos: {{ $json[\"Empresa a la que perteneces\"] }}', 1;\n  \n  SET @Nombre = UPPER(LTRIM(RTRIM('{{ $json.Nombre }}')));\n  SET @Apellidos = UPPER(LTRIM(RTRIM('{{ $json.Apellidos }}')));\n  SET @FechaNacimiento = TRY_CONVERT(DATETIME, '{{ $json.fecha_nacimiento_limpia }}', 111);\n  \n  -- Validar fecha de nacimiento\n  IF @FechaNacimiento IS NULL\n    THROW 50005, 'Fecha de nacimiento inválida: {{ $json.fecha_nacimiento_limpia }}', 1;\n  \n  IF @FechaNacimiento > GETDATE()\n    THROW 50006, 'Fecha de nacimiento no puede ser futura', 1;\n    \n  IF @FechaNacimiento < '1900-01-01'\n    THROW 50007, 'Fecha de nacimiento demasiado antigua', 1;\n  \n  SET @SexoTexto = UPPER('{{ $json.Sexo }}');\n  SET @RH = UPPER(LTRIM(RTRIM('{{ $json[\"Tipo de Sangre\"] }}')));\n  SET @Direccion = UPPER(LTRIM(RTRIM('{{ $json[\"Dirección de residencia (Especificar la ciudad)\"] }}')));\n  SET @Ciudad = LTRIM(RTRIM('{{ $json.Sede }}'));\n  SET @NumeroTelefono = '{{ $json.telefono_limpio }}';\n  SET @Email = UPPER(LTRIM(RTRIM('{{ $json[\"E-mail personal\"] }}')));\n  SET @EPS = UPPER(LTRIM(RTRIM('{{ $json.EPS }}')));\n  SET @AFP = NULL;\n  SET @CreatedTime = GETDATE();\n  \n  -- Buscar supervisor (permitir NULL si no se encuentra)\n  SET @IDSupervisor = NULL;\n  \n  IF LEN(LTRIM(RTRIM('{{ $json[\"Nombre del Jefe Inmediato\"] }}'))) > 0\n  BEGIN\n    SET @IDSupervisor = (\n      SELECT TOP 1 e.ID\n      FROM dbo.Empleado AS e\n      WHERE \n        e.EstadoEmpleado = 1\n        AND (\n          (LTRIM(RTRIM(e.Nombre)) + ' ' + LTRIM(RTRIM(e.Apellidos))) LIKE '%' + LTRIM(RTRIM('{{ $json[\"Nombre del Jefe Inmediato\"] }}')) + '%'\n          OR (LTRIM(RTRIM(e.Apellidos)) + ' ' + LTRIM(RTRIM(e.Nombre))) LIKE '%' + LTRIM(RTRIM('{{ $json[\"Nombre del Jefe Inmediato\"] }}')) + '%'\n        )\n    );\n  END;\n\n  -- ===============================\n  --  UPSERT (insert/update)\n  -- ===============================\n  IF EXISTS (SELECT 1 FROM dbo.Empleado WHERE NumeroDocumento = @NumeroDocumento)\n  BEGIN\n    UPDATE Empleado\n    SET\n      TipoDocumento = @TipoDocumentoID,\n      Nombre = @Nombre,\n      Apellidos = @Apellidos,\n      FechaNacimiento = @FechaNacimiento,\n      Sexo = LEFT(@SexoTexto, 1),\n      RH = @RH,\n      Direccion = @Direccion,\n      Ciudad = @Ciudad,\n      NumeroTelefono = @NumeroTelefono,\n      Email = @Email,\n      CargoID = @CargoID,\n      EmpresaID = @EmpresaID,\n      EPS = @EPS,\n      AFP = @AFP,\n      IDSupervisor = @IDSupervisor,\n      FechaIngreso = ISNULL(FechaIngreso, @CreatedTime)\n    WHERE NumeroDocumento = @NumeroDocumento;\n    \n    SELECT \n      'ok' AS status, \n      @NumeroDocumento AS documento, \n      'updated' AS action,\n      @Nombre + ' ' + @Apellidos AS nombre_completo,\n      @RowNumber AS row_number,\n      @@ROWCOUNT AS rows_affected;\n  END\n  ELSE\n  BEGIN\n    INSERT INTO Empleado\n    (NumeroDocumento, TipoDocumento, Nombre, Apellidos, FechaNacimiento, Sexo, RH, Direccion, \n     Ciudad, NumeroTelefono, Email, CargoID, EmpresaID, EPS, AFP, IDSupervisor, FechaIngreso, EstadoEmpleado)\n    VALUES\n    (\n      @NumeroDocumento, @TipoDocumentoID, @Nombre, @Apellidos, @FechaNacimiento,\n      LEFT(@SexoTexto, 1), @RH, @Direccion, @Ciudad, @NumeroTelefono, @Email,\n      @CargoID, @EmpresaID, @EPS, @AFP, @IDSupervisor, @CreatedTime, 1\n    );\n    \n    SELECT \n      'ok' AS status, \n      @NumeroDocumento AS documento, \n      'inserted' AS action,\n      @Nombre + ' ' + @Apellidos AS nombre_completo,\n      @RowNumber AS row_number,\n      @@ROWCOUNT AS rows_affected;\n  END;\n\nEND TRY\nBEGIN CATCH\n  SELECT \n    'error' AS status,\n    @NumeroDocumento AS documento,\n    ERROR_MESSAGE() AS error_message,\n    ERROR_NUMBER() AS error_number,\n    ERROR_LINE() AS error_line,\n    @RowNumber AS row_number;\nEND CATCH;"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        1632,
+        272
+      ],
+      "id": "e00292a1-584d-4f98-b499-aed289c09ab5",
+      "name": "SQL UPSERT",
+      "credentials": {
+        "microsoftSql": {
+          "id": "vBK9tJyT9S8t59As",
+          "name": "Microsoft SQL RRHH"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "1jTOx0wxi4rwslChZNcAjXz6sdp5XVxYyGguY0sXgQ9Y",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1760163365,
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        960,
+        272
+      ],
+      "id": "17aa65fd-6a5f-4adc-baec-bf831f438988",
+      "name": "Google Sheets Trigger1",
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": {
+          "id": "NxlgVHyoSjlu8nmJ",
+          "name": "Google Sheets Trigger account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1408,
+        272
+      ],
+      "id": "a45c555a-6810-4c54-bab6-a0f513ddc388",
+      "name": "Loop Over Items2"
+    }
+  ],
+  "connections": {
+    "Clean & Validate All Data": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Clean & Validate All Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items2": {
+      "main": [
+        [
+          {
+            "node": "SQL UPSERT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d2d63babb79971184bb79480f63d2f96210c8ac558281def329c83b3b146245a"
+  }
+}
