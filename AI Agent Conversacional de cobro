@@ -1,0 +1,1160 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7c0e7b4b-342a-43d9-98d0-d383de1d8cf7",
+              "name": "sender",
+              "value": "={{ $json.body.data.key.remoteJid }}",
+              "type": "string"
+            },
+            {
+              "id": "63566525-58bb-474e-b363-f218f196cd15",
+              "name": "mensaje",
+              "value": "=={{ \n  $json.body.data.message.conversation \n  || $json.body.data.message.extendedTextMessage?.text\n  || null\n}}\n",
+              "type": "string"
+            },
+            {
+              "id": "6f616e3b-5a54-45ae-89d6-5fe50910a117",
+              "name": "Instancia",
+              "value": "={{ $json.body.instance }}",
+              "type": "string"
+            },
+            {
+              "id": "e74683c5-3350-4987-a200-df59c30f658a",
+              "name": "session_id",
+              "value": "={{ $json.body.data.key.id }}",
+              "type": "string"
+            },
+            {
+              "id": "54e495b7-589b-47ae-993e-e4eac49c6e9f",
+              "name": "mensaje_timestamp",
+              "value": "={{ $json.body.data.messageTimestamp }}",
+              "type": "number"
+            },
+            {
+              "id": "7f1cbf49-3157-4c27-9269-7db966b26c51",
+              "name": "Tipo_mensaje",
+              "value": "={{  Object.keys($json.body.data.message)[0]}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        912,
+        -176
+      ],
+      "id": "c775349f-ef78-4c07-99bd-bbabe461f390",
+      "name": "PARSE - Extraer Campos Mensaje"
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $json.sender }}",
+        "messageData": "={{ JSON.stringify({\n      message   : $json.mensaje,\n      sessionID : $json.session_id,\n      date_time : $json.mensaje_timestamp.toDateTime('s').toLocal()\n}) }}\n",
+        "tail": "={{ false }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        2480,
+        -176
+      ],
+      "id": "a12854f3-0d46-4e90-960f-71d363e84999",
+      "name": "BUFFER - Guardar Mensaje en Cola",
+      "credentials": {
+        "redis": {
+          "id": "pnpO09ZMn4c0YcOi",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "Mensaje",
+        "key": "={{ $('PARSE - Extraer Campos Mensaje').item.json.sender }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        2704,
+        -176
+      ],
+      "id": "517616d1-c947-47ed-bda5-b6c201545c90",
+      "name": "BUFFER - Leer Cola Mensajes",
+      "credentials": {
+        "redis": {
+          "id": "pnpO09ZMn4c0YcOi",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ JSON.parse(\n  $json.Mensaje\n    .filter(m => m.trim().startsWith('{'))\n    .slice(-1)[0]\n    .split('||')[0]\n    .trim()\n).sessionID }}\n",
+                    "rightValue": "={{ String($node[\"BUFFER - Guardar Mensaje en Cola\"].json.session_id).trim() }}\n",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    },
+                    "id": "81c7205c-84c9-480e-8b5a-1a12b5ff7baa"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Ignorar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "4fca4c39-e8bf-490b-8e2e-176c95d9156e",
+                    "leftValue": "={{ DateTime.fromISO(JSON.parse($json.Mensaje.filter(m => m.trim().startsWith('{')).slice(-1)[0].split('||')[0].trim()).date_time) }}\n",
+                    "rightValue": "={{ $now.minus(7, 'seconds').toLocal() }}",
+                    "operator": {
+                      "type": "dateTime",
+                      "operation": "before"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Continuar"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Esperar"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2928,
+        -288
+      ],
+      "id": "dcf9eaa9-dd7c-47db-bc30-728dba0c3eca",
+      "name": "CONTROL - Evaluar Timing Mensaje"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3152,
+        -464
+      ],
+      "id": "3222cb59-1868-48bc-b03d-738e221ea651",
+      "name": "FIN - Ignorar Duplicado"
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3152,
+        -80
+      ],
+      "id": "3e2ae314-e004-4e9d-952c-c17c01c4c828",
+      "name": "CONTROL - Esperar Mensaje Siguiente",
+      "webhookId": "cdc19260-5f14-4485-93ca-d062eaa11d7d"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('PARSE - Extraer Campos Mensaje').item.json.sender }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        3152,
+        -272
+      ],
+      "id": "49069296-c4e3-4c59-ae56-c6ecd02a686b",
+      "name": "BUFFER - Limpiar Cola",
+      "credentials": {
+        "redis": {
+          "id": "pnpO09ZMn4c0YcOi",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b594f1da-51e8-47a4-a636-7928a73b69f8",
+              "name": "mensaje",
+              "value": "=={{ $json.Mensaje.map(m => JSON.parse(m).message || '').filter(Boolean).join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3376,
+        -272
+      ],
+      "id": "ebcdda26-7268-471b-a8c7-b8f5595940b3",
+      "name": "PARSE - Unificar Mensajes del Buffer"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "=Eres un clasificador interno de mensajes para SUMASPAY (cartera pre-jurídica).\nAnaliza el mensaje y devuelve ÚNICAMENTE un objeto JSON válido. Sin texto adicional, sin markdown.\n\nReglas de clasificación:\n- hablar_con_persona: true si el cliente pide asesor, persona o humano\n- envio_cedula: true si el mensaje contiene AL MENOS UN número de 6-12 dígitos\n- cedulas_encontradas: array con TODOS los números de 6-12 dígitos encontrados en el mensaje (como strings). Si no hay ninguno, array vacío.\n- cedula_indicada: si el cliente indica EXPLÍCITAMENTE cuál de las cédulas tiene la obligación (frases como \"la mía\", \"la obligación está con mi cédula\", \"la mía es\", \"es la última\"), extrae ESE número específico. Si no indica cuál, devuelve null.\n- cedula: si cedula_indicada no es null, usa ese valor. Si cedulas_encontradas tiene exactamente 1 elemento, usa ese. Si hay varias y no se indica cuál, devuelve null.\n- consultar_bd: true SOLO si cedula no es null\n- multiples_cedulas: true si cedulas_encontradas tiene más de 1 elemento\n- cliente_molesto: true si hay insultos, amenazas o palabras como \"demanda\", \"juzgado\", \"abogado\"\n- menciona_pago: true si el cliente habla de pagar, abonar, cuota, acuerdo\n- niega_deuda: true si el cliente dice que no debe o que ya pagó\n- mensaje_normal: true si no aplica ninguna de las anteriores\n- solicita_medios_pago: true si el cliente pregunta cómo pagar, \n  dónde pagar, métodos de pago, medios de pago, número de cuenta, \n  consignación, transferencia, o frases como \"cómo le pago\", \n  \"a qué cuenta\", \"dónde consigno\"\n\nEjemplos de cedula_indicada:\n- \"la obligación está con mi cédula 1243338139\" → cedula_indicada: \"1243338139\"\n- \"la mía es 1243338139\" → cedula_indicada: \"1243338139\"\n- \"la cédula de mi papa es 111, la mía es 222\" → cedula_indicada: \"222\"\n- \"tengo estas cédulas: 111, 222, 333\" → cedula_indicada: null\n- cedula_indicada: extrae el número asociado a frases posesivas \n  del hablante como \"la mía\", \"la mia\", \"yo soy\", \"la mía es\", \n  \"mi cédula es\", \"la obligación está con la mía\", incluso cuando \n  aparecen en oraciones largas con múltiples números.\n  IMPORTANTE: si en el mensaje hay frases como \"la mia es X\" o \n  \"mi cedula es X\", ese X es cedula_indicada aunque haya otros \n  números en el mismo mensaje.\n  Si no hay indicación posesiva del hablante, devuelve null.\n\nEjemplos actualizados de cedula_indicada:\n- \"la mia es 1243338139\" → cedula_indicada: \"1243338139\"\n- \"la cedula de mi papa es 111, la de mi tio es 222 y la mia es 333\" → cedula_indicada: \"333\"\n- \"mi cedula es 123456789\" → cedula_indicada: \"123456789\"\n- \"la obligación está con mi cédula 1243338139\" → cedula_indicada: \"1243338139\"\n- \"la cédula de mi papa es 111, la mía es 222\" → cedula_indicada: \"222\"\n- \"tengo estas cédulas: 111, 222, 333\" → cedula_indicada: null\n- \"la cedula de mi papa es 111 y la de mi tio es 222\" → cedula_indicada: null\n\nEstructura EXACTA (todos los campos siempre presentes):\n{\n  \"hablar_con_persona\": false,\n  \"envio_cedula\": false,\n  \"cedulas_encontradas\": [],\n  \"cedula_indicada\": null,\n  \"cedula\": null,\n  \"consultar_bd\": false,\n  \"multiples_cedulas\": false,\n  \"cliente_molesto\": false,\n  \"menciona_pago\": false,\n  \"niega_deuda\": false,\n  \"mensaje_normal\": false,\n  \"solicita_medios_pago\": false\n}"
+            },
+            {
+              "content": "={{ $json.mensaje }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2,
+      "position": [
+        4048,
+        -272
+      ],
+      "id": "79fe7645-adc5-4d6b-8256-d97a1739430d",
+      "name": "IA - Clasificar Intención del Mensaje",
+      "credentials": {
+        "openAiApi": {
+          "id": "G8BSBakutWjW1MSX",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\n\n// Paso 1 — Extraer el texto de la respuesta del clasificador\nlet text = '';\n\nif (raw.output && Array.isArray(raw.output)) {\n  text = raw.output?.[0]?.content?.[0]?.text || '';\n} else if (typeof raw.output === 'string') {\n  text = raw.output;\n} else if (raw.message?.content) {\n  text = raw.message.content;\n}\n\n// Paso 2 — Limpiar markdown accidental\nconst clean = text.replace(/```json|```/g, '').trim();\n\n// Paso 3 — Parsear el JSON\nlet parsed;\ntry {\n  parsed = JSON.parse(clean);\n} catch (e) {\n  parsed = {\n    hablar_con_persona:   false,\n    envio_cedula:         false,\n    cedulas_encontradas:  [],\n    cedula_indicada:      null,\n    cedula:               null,\n    consultar_bd:         false,\n    multiples_cedulas:    false,\n    cliente_molesto:      false,\n    menciona_pago:        false,\n    niega_deuda:          false,\n    mensaje_normal:       true,\n    solicita_medios_pago: false\n  };\n}\n\n// Paso 4 — Construir resultado con todos los campos garantizados\nconst resultado = {\n  hablar_con_persona:   parsed.hablar_con_persona   ?? false,\n  envio_cedula:         parsed.envio_cedula         ?? false,\n  cedulas_encontradas:  parsed.cedulas_encontradas  ?? [],\n  cedula_indicada:      parsed.cedula_indicada      ?? null,\n  cedula:               parsed.cedula               ?? null,\n  consultar_bd:         parsed.consultar_bd         ?? false,\n  multiples_cedulas:    parsed.multiples_cedulas    ?? false,\n  cliente_molesto:      parsed.cliente_molesto      ?? false,\n  menciona_pago:        parsed.menciona_pago        ?? false,\n  niega_deuda:          parsed.niega_deuda          ?? false,\n  mensaje_normal:       parsed.mensaje_normal       ?? false,\n  solicita_medios_pago: parsed.solicita_medios_pago ?? false\n};\n\n// Paso 5 — Suprimir consulta BD solo si el cliente NO envió cédula nueva en este turno\n// FIX: antes suprimía siempre que cliente_conocido=true, lo que impedía actualizar\n// la cédula si el cliente enviaba una corrección en un turno posterior.\ntry {\n  const contextoRedis = $('PARSE - Resolver Contexto Cliente').first().json;\n  const clienteConocido = contextoRedis.cliente_conocido;\n  const envioNuevaCedula = resultado.envio_cedula === true;\n\n  if (clienteConocido && !envioNuevaCedula) {\n    // Cliente ya conocido y no mandó cédula nueva → no re-consultar BD\n    resultado.consultar_bd    = false;\n    resultado.cedula_presente = true;\n  }\n  // Si envioNuevaCedula=true, se respeta el consultar_bd que devolvió el clasificador\n} catch(e) {\n  // Si el nodo no existe o falla, continuamos sin modificar\n}\n\nreturn [{ json: resultado }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        -272
+      ],
+      "id": "b05bab32-b0ec-4c09-8088-d07280b2f76c",
+      "name": "PARSE - Normalizar Clasificación"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c14d799b-89d8-45b1-a65a-05ce53457861",
+                    "leftValue": "={{ $json.hablar_con_persona }}",
+                    "rightValue": "Hablar_Persona",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Hablar_Persona"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8f7bda00-27a4-4963-81c5-4d313d9429f3",
+                    "leftValue": "={{ $json.consultar_bd }}",
+                    "rightValue": "True",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Consultar_BD"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "3c5928ea-91a8-4a65-8a9a-97b72eb2800c",
+                    "leftValue": "={{ $json.solicita_medios_pago }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Medios_Pago"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "634db80c-c206-4c7b-b4e5-3b0596b431e4",
+                    "leftValue": "={{ $json.multiples_cedulas }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Multiples_Cedulas"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Sin_Cedula"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        4624,
+        -320
+      ],
+      "id": "3a6bd71c-16bd-4d83-9564-943c07cfc933",
+      "name": "CONTROL - Enrutar por Intención"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DECLARE @cedula NVARCHAR(50) = '{{ $json.cedula }}';\n\nIF EXISTS (\n    SELECT 1 \n    FROM EstadoClienteSumasAdmin\n    WHERE [Nit / Cedula] = @cedula\n)\nBEGIN\n    SELECT\n        [nombre_cliente],\n        [Marca],\n        [dias_de_mora],\n        [Vlr_Saldo total]\n    FROM EstadoClienteSumasAdmin\n    WHERE [Nit / Cedula] = @cedula;\nEND\nELSE\nBEGIN\n    SELECT\n        'No existe' AS [nombre_cliente],\n        'No existe' AS [Marca],\n        'No existe' AS [dias_de_mora],\n        'No existe' AS [Vlr_Saldo total];\nEND"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        4896,
+        -304
+      ],
+      "id": "97661a21-006e-4a78-9298-3487f2f26ed0",
+      "name": "BD - Consultar Obligaciones Cliente",
+      "credentials": {
+        "microsoftSql": {
+          "id": "5eu5uL5ouqSpZ2nF",
+          "name": "Microsoft SQL Lumia"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=mensaje: {{ $json.mensaje_cliente }}\nContexto:\n- cedula_presente: {{ $json.cedula_presente }}\n- cliente_existe_bd: {{ $json.cliente_existe_bd || false }}\n- cliente_molesto: {{ $json.cliente_molesto }}\n- tiene_obligaciones: {{ $json.tiene_obligaciones }}\n- cantidad_obligaciones: {{ $json.cantidad_obligaciones }}\n- obligaciones: {{ JSON.stringify($json.obligaciones) }}\n- nombre_cliente: {{ $json.nombre_cliente || 'null' }}\n- multiples_cedulas: true si el cliente envió más de una cédula \n  sin indicar cuál tiene la obligación\n- cedulas_encontradas: array con todas las cédulas detectadas\n- hablar_con_persona: {{ $json.hablar_con_persona || false }}\n- numero_asesor: {{ $json.numero_asesor || '300 7785883' }}\n- solicita_medios_pago: {{ $json.solicita_medios_pago || false }}",
+        "options": {
+          "systemMessage": "=Eres el asistente virtual de cobranza de CREDITO SUMAS, una cartera \npre-jurídica operando exclusivamente por WhatsApp. Tu misión es \nayudar a clientes a regularizar su situación antes de que escale \na proceso jurídico.\n\nMÚLTIPLES CÉDULAS SIN INDICAR CUÁL \n(multiples_cedulas=true y cedula_presente=false)\nEl cliente envió varias cédulas pero no aclaró cuál tiene \nla obligación con CREDITO SUMAS. Pregunta de forma natural y \ndirecta cuál cédula está asociada a la obligación. No menciones las cédulas recibidas por seguridad.\nEjemplo: \"Recibí varias cédulas, ¿me confirmas cuál tiene la obligación con CREDITO SUMAS?\"\n\nMÚLTIPLES CÉDULAS CON INDICACIÓN EXPLÍCITA\n(multiples_cedulas=true y cedula_presente=true)\nEl cliente ya indicó cuál cédula tiene la obligación. \nProcede exactamente igual que si hubiera enviado una sola \ncédula. No hagas referencia a las otras cédulas.\n\nREGLAS DE FORMATO — OBLIGATORIAS\n- Máximo 3 oraciones por respuesta\n- Sin markdown de ningún tipo (sin asteriscos, sin #, sin guiones)\n- Máximo 1 emoji por mensaje, solo cuando el tono sea positivo\n- Nunca repitas información del turno anterior\n- EXCEPCIÓN DE FORMATO: cuando cantidad_obligaciones > 1, \n  usa una línea por obligación con salto de línea simple, \n  sin guiones ni asteriscos\n\nVARIABLES DE CONTEXTO QUE RECIBIRÁS\n- cedula_presente: true si ya consultamos la cédula\n- cliente_existe_bd: true si aparece en base de datos\n- nombre_cliente: nombre registrado o null\n- tiene_obligaciones: true si hay deudas activas\n- cantidad_obligaciones: número de obligaciones\n- obligaciones: array JSON [{marca, dias_de_mora, saldo}, ...]\n  → DEBES iterar TODOS los elementos sin omitir ninguno\n- cliente_molesto: true si muestra hostilidad o urgencia extrema\n- menciona_pago: true si habló de pagar, abonar o acuerdo\n- niega_deuda: true si dice que no debe o ya pagó\n- hablar_con_persona: true si pide hablar con un humano\n\nINSTRUCCIONES CRÍTICAS\n1. Si cedula_presente=true, NUNCA vuelvas a pedir la cédula.\n2. Usa siempre el nombre del cliente cuando esté disponible.\n3. Nunca inventes montos, fechas ni condiciones de pago.\n4. Nunca prometas descuentos ni condonaciones sin asesor.\n5. Menciona saldos con el número EXACTO recibido, sin redondear.\n6. \"Proceso jurídico\" es información del siguiente paso, nunca amenaza.\n7. Evita frases vacías como \"entiendo perfectamente\" o \"con gusto\".\n8. Cuando en cualquier flujo decidas conectar al cliente\ncon un asesor, siempre incluye el número 300 7785883\nen tu respuesta. Nunca digas \"te conectaré con un asesor\"\nsin dar el número.\n\nFLUJOS DE CONVERSACIÓN\n\nPRIMER CONTACTO (cedula_presente=false)\nPreséntate como asistente de CREDITO SUMAS, explica que consultas \nel estado de obligación y opciones de pago, pide cédula de \nforma cálida y natural.\n\nCLIENTE MENCIONA PAGO SIN CÉDULA \n(menciona_pago=true y cedula_presente=false)\nMuestra disposición inmediata. Explica que con la cédula ves \nel saldo exacto y opciones. Agrega que resolver hoy evita \npasos adicionales.\n\nCÉDULA NO ENCONTRADA \n(cedula_presente=true y cliente_existe_bd=false)\nInforma que no aparece obligación activa. Sugiere verificar \nsi la deuda está a nombre de otra persona. Ofrece conectar \ncon asesor si cree que hay error.\n\nSIN DEUDAS ACTIVAS \n(cedula_presente=true y tiene_obligaciones=false)\nDa la buena noticia con el nombre del cliente. Cierra cordialmente.\n\nUNA DEUDA (cantidad_obligaciones=1)\nUsa nombre, menciona marca y saldo exacto. Propón iniciar \nacuerdo hoy indicando que resolver ahora evita escalamiento.\n\nMÚLTIPLES DEUDAS (cantidad_obligaciones>1)\nItera el array obligaciones completo. Formato exacto:\n\nHola [nombre_cliente], tienes obligaciones pendientes con CREDITO SUMAS:\n[marca]: [dias_de_mora] días de mora — saldo $[saldo]\n[marca]: [dias_de_mora] días de mora — saldo $[saldo]\n\nPropón un acuerdo global al final en una sola oración.\n\nCLIENTE PIDE HABLAR CON PERSONA (hablar_con_persona=true)\nEl cliente quiere comunicarse con un asesor humano.\nBríndale directamente el número: 300 7785883\nIndícale que puede llamar o escribir a ese número para \nser atendido por un asesor. Despídete cordialmente.\nNo insistas en continuar la conversación por este canal.\n\nCLIENTE MOLESTO (cliente_molesto=true)\nValida sin defenderte. Usa: \"Tienes razón en querer esto resuelto, \ntrabajemos en eso.\" Si tienes cédula, ve directo a datos; si no, \npídela con empatía.\n\nCLIENTE NIEGA DEUDA (niega_deuda=true)\nSin cédula: pídela para verificar.\nCon cédula y existe deuda: valida posible confusión, ofrece \nque asesor revise historial.\nCon cédula y sin deuda: confirma que no aparece nada y ofrece \ncertificado de paz y salvo.\n\nCLIENTE MENCIONA PAGO CON DEUDAS \n(menciona_pago=true y tiene_obligaciones=true)\nConfirma obligaciones con marcas. Propón: pago total, cuota \núnica de arreglo, o plan de pagos. Pide preferencia para \nconectar con asesor.\n\nCLIENTE SOLICITA MEDIOS DE PAGO (solicita_medios_pago=true)\nEl cliente pregunta cómo o dónde realizar el pago.\nResponde EXACTAMENTE con este texto, sin modificar nada, \nsin agregar palabras, sin cambiar el orden:\n\nTu saldo a cancelar es $[saldo]. Puedes realizar tu pago por los siguientes medios:  \n\n📍Corresponsales Bancolombia\n📍Pago en línea: https://pagos.sumas.co \n📍Tiendas Fisicas\n\n\nUna vez realizado el pago, envíanos el comprobante aquí mismo 🙌\n\nSi ya tienes la cédula del cliente y tiene obligaciones activas, \nagrega UNA línea antes del listado con el saldo exacto:\n\"Tu saldo a cancelar es $[saldo]\"\nSi no tienes la cédula, agrega UNA línea al final:\n\"Compártenos tu cédula para confirmarte el saldo exacto.\"\n\nCIERRE\nCuando el cliente confirme que será contactado o no tenga más \npreguntas, despídete brevemente usando su nombre. No hagas \nmás preguntas innecesarias."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        5296,
+        -272
+      ],
+      "id": "43266e94-a543-4159-8799-5d0256703834",
+      "name": "IA - Agente Cobranza SUMASPAY"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        5312,
+        -48
+      ],
+      "id": "6eb07bfd-9957-4e3f-908b-d83b77bf8a9d",
+      "name": "CONFIG - Modelo GPT Agente",
+      "credentials": {
+        "openAiApi": {
+          "id": "G8BSBakutWjW1MSX",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('PARSE - Extraer Campos Mensaje').first().json.sender }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        5440,
+        -48
+      ],
+      "id": "4134bd48-f819-4436-8233-6d8ff2f7c8e0",
+      "name": "CONFIG - Memoria Conversacional"
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "operation": "send-presence",
+        "instanceName": "={{ $('PARSE - Extraer Campos Mensaje').first().json.Instancia }}",
+        "remoteJid": "={{ $('PARSE - Extraer Campos Mensaje').first().json.sender }}",
+        "delay": "={{ Math.round(1800 + Math.min(($json.output?.length || 0) / 500, 1) * 1200) }}"
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        6320,
+        -272
+      ],
+      "id": "a0e21b87-8119-4e78-8527-7e1a01ccbfa2",
+      "name": "WA - Simular Escritura",
+      "credentials": {
+        "evolutionApi": {
+          "id": "mMZPJcPFlm7RFmHq",
+          "name": "Evolution account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "={{ $('PARSE - Extraer Campos Mensaje').first().json.Instancia }}",
+        "remoteJid": "={{ $('PARSE - Extraer Campos Mensaje').first().json.sender }}",
+        "messageText": "={{ $('IA - Agente Cobranza SUMASPAY').first().json.output }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        6544,
+        -272
+      ],
+      "id": "b74c4eec-b259-459f-800b-54a4db192dcb",
+      "name": "WA - Enviar Respuesta Cliente",
+      "credentials": {
+        "evolutionApi": {
+          "id": "mMZPJcPFlm7RFmHq",
+          "name": "Evolution account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "EstadoCliente",
+        "key": "=estado:{{ $('PARSE - Extraer Campos Mensaje').first().json.sender }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        3600,
+        -272
+      ],
+      "id": "0cb3834b-35c0-4593-9cbf-8353f96d72b9",
+      "name": "ESTADO - Leer Contexto Cliente",
+      "credentials": {
+        "redis": {
+          "id": "pnpO09ZMn4c0YcOi",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sender = $('PARSE - Extraer Campos Mensaje').first().json.sender;\nconst mensaje = $('PARSE - Unificar Mensajes del Buffer').first().json.mensaje;\nconst rawEstado = $input.first().json.EstadoCliente;\n\n// Intentar parsear el estado guardado en Redis\nlet estadoGuardado = null;\ntry {\n  estadoGuardado = rawEstado ? JSON.parse(rawEstado) : null;\n} catch(e) {\n  estadoGuardado = null;\n}\n\nconst esClienteConocido = estadoGuardado !== null && \n                           estadoGuardado.cedula_presente === true;\n\nreturn [{\n  json: {\n    mensaje,\n    sender,\n    cliente_conocido:    esClienteConocido,\n    cedula_presente:     estadoGuardado?.cedula_presente     ?? false,\n    cedula:              estadoGuardado?.cedula              ?? null,\n    nombre_cliente:      estadoGuardado?.nombre_cliente      ?? null,\n    cliente_existe_bd:   estadoGuardado?.cliente_existe_bd   ?? false,\n    tiene_obligaciones:  estadoGuardado?.tiene_obligaciones  ?? false,\n    obligaciones:        estadoGuardado?.obligaciones        ?? [],\n    cantidad_turnos:     estadoGuardado?.cantidad_turnos     ?? 0,\n    instancia:           $('PARSE - Extraer Campos Mensaje').first().json.Instancia\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3824,
+        -272
+      ],
+      "id": "dadb0aa0-6a21-485a-838c-9f22a656fecc",
+      "name": "PARSE - Resolver Contexto Cliente"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ESTADO - Guardar Contexto Cliente (simplificado)\nconst sender   = $('PARSE - Extraer Campos Mensaje').first().json.sender;\nconst contexto = $('PARSE - Armar Contexto Unificado').first().json;  // ← 1 sola referencia\nconst clas     = $('PARSE - Normalizar Clasificación').first().json;\n\nconst nuevoEstado = {\n  cedula_presente:    contexto.cedula_presente    ?? false,\n  cedula:             contexto.cedula             ?? null,\n  nombre_cliente:     contexto.nombre_cliente     ?? null,\n  cliente_existe_bd:  contexto.cliente_existe_bd  ?? false,\n  tiene_obligaciones: contexto.tiene_obligaciones ?? false,\n  obligaciones:       contexto.obligaciones       ?? [],\n  cantidad_turnos:    ($('PARSE - Resolver Contexto Cliente').first().json.cantidad_turnos ?? 0) + 1,\n  ultimo_mensaje:     new Date().toISOString(),\n  instancia:          $('PARSE - Extraer Campos Mensaje').first().json.Instancia\n};\n\nreturn [{ json: {\n  estado:             JSON.stringify(nuevoEstado),\n  sender,\n  ruta_tomada:        contexto.ruta_tomada        ?? 'Sin_Cédula',\n  cedula:             nuevoEstado.cedula,\n  nombre_cliente:     nuevoEstado.nombre_cliente,\n  cliente_existe_bd:  nuevoEstado.cliente_existe_bd,\n  tiene_obligaciones: nuevoEstado.tiene_obligaciones,\n  obligaciones_json:  JSON.stringify(nuevoEstado.obligaciones),\n  instancia:          nuevoEstado.instancia,\n  mensaje_cliente:    contexto.mensaje_cliente    ?? '',\n  cedula_presente:    nuevoEstado.cedula_presente,\n  cliente_molesto:    clas.cliente_molesto        === true,\n  menciona_pago:      clas.menciona_pago          === true,\n  solicita_medios:    clas.solicita_medios_pago   === true,\n  intencion_json:     JSON.stringify(clas)\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5648,
+        -272
+      ],
+      "id": "920b1763-7c9d-4a6c-9035-5bf6eaf9a4e4",
+      "name": "ESTADO - Guardar Contexto Cliente"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "=estado:{{ $json.sender }}",
+        "value": "={{ $json.estado }}",
+        "expire": true,
+        "ttl": 86400
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        5872,
+        -272
+      ],
+      "id": "50c449e3-316e-4ad5-9c6c-afcf8f50104c",
+      "name": "ESTADO - Persistir en Redis",
+      "credentials": {
+        "redis": {
+          "id": "pnpO09ZMn4c0YcOi",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "EXEC dbo.usp_GuardarEstadoBot\n  @numero_whatsapp    = '{{ $json.sender.replace(/'/g, \"''\") }}',\n  @cedula             = '{{ ($json.cedula ?? \"\").toString().replace(/'/g, \"''\") }}',\n  @nombre_cliente     = '{{ ($json.nombre_cliente ?? \"\").toString().replace(/'/g, \"''\") }}',\n  @cliente_existe_bd  = {{ $json.cliente_existe_bd ? 1 : 0 }},\n  @tiene_obligaciones = {{ $json.tiene_obligaciones ? 1 : 0 }},\n  @obligaciones_json  = '{{ ($json.obligaciones_json ?? \"[]\").replace(/'/g, \"''\") }}',\n  @instancia          = '{{ ($json.instancia ?? \"\").replace(/'/g, \"''\") }}',\n  @mensaje_cliente    = '{{ ($json.mensaje_cliente ?? \"\").replace(/'/g, \"''\") }}',\n  @respuesta_agente   = '{{ ($(\"IA - Agente Cobranza SUMASPAY\").first().json.output ?? \"\").replace(/'/g, \"''\") }}',\n  @intencion_json     = '{{ ($json.intencion_json ?? \"{}\").replace(/'/g, \"''\") }}',\n  @ruta_tomada        = '{{ ($json.ruta_tomada ?? \"\").replace(/'/g, \"''\") }}',\n  @cedula_presente    = {{ $json.cedula_presente ? 1 : 0 }},\n  @cliente_molesto    = {{ $json.cliente_molesto ? 1 : 0 }},\n  @menciona_pago      = {{ $json.menciona_pago ? 1 : 0 }},\n  @solicita_medios    = {{ $json.solicita_medios ? 1 : 0 }};"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        6096,
+        -272
+      ],
+      "id": "c88b6d20-632f-48c9-8c50-57332a535bda",
+      "name": "ESTADO - Registrar en SQL",
+      "credentials": {
+        "microsoftSql": {
+          "id": "5eu5uL5ouqSpZ2nF",
+          "name": "Microsoft SQL Lumia"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// PARSE - Armar Contexto Unificado\nconst redis   = $('PARSE - Resolver Contexto Cliente').first().json;\nconst clas    = $('PARSE - Normalizar Clasificación').first().json;\nconst mensaje = $('PARSE - Unificar Mensajes del Buffer').first().json.mensaje;\n\n// ── Campos comunes a todas las rutas ──────────────────────────────────────\nconst base = {\n  mensaje_cliente:       mensaje,\n  cedula_presente:       redis.cedula_presente     ?? false,\n  cedula:                redis.cedula              ?? null,\n  nombre_cliente:        redis.nombre_cliente      ?? null,\n  cliente_existe_bd:     redis.cliente_existe_bd   ?? false,\n  tiene_obligaciones:    redis.tiene_obligaciones  ?? false,\n  obligaciones:          redis.obligaciones        ?? [],\n  cantidad_obligaciones: (redis.obligaciones       ?? []).length,\n  cliente_molesto:       clas.cliente_molesto      === true,\n  menciona_pago:         clas.menciona_pago        === true,\n  niega_deuda:           clas.niega_deuda          === true,\n  solicita_medios_pago:  clas.solicita_medios_pago === true,\n  hablar_con_persona:    false,\n  multiples_cedulas:     false,\n};\n\n// ── Detectar la ruta activa ───────────────────────────────────────────────\n\n// Ruta 1: Hablar con persona\nif (clas.hablar_con_persona === true) {\n  return [{ json: {\n    ...base,\n    hablar_con_persona:   true,\n    numero_asesor:        '300 7785883',\n    solicita_medios_pago: false,\n    ruta_tomada:          'Hablar_Persona'\n  }}];\n}\n\n// Ruta 2: Medios de pago\nif (clas.solicita_medios_pago === true) {\n  return [{ json: {\n    ...base,\n    solicita_medios_pago: true,\n    menciona_pago:        true,\n    ruta_tomada:          'Medios_Pago'\n  }}];\n}\n\n// Ruta 3: Consultar BD\ntry {\n  const bdItems = $('BD - Consultar Obligaciones Cliente').all();\n\n  if (bdItems && bdItems.length > 0) {\n    const primer = bdItems[0].json;\n    const noExiste = primer?.nombre_cliente === 'No existe' || primer?.nombre_cliente == null;\n\n    // FIX: antes usaba solo clas.cedula, que es null cuando el cliente\n    // no envió cédula en este turno pero ya tenía una guardada en Redis.\n    // Ahora: preferir la cédula nueva del clasificador, con fallback a Redis.\n    const cedulaResuelta = clas.cedula ?? redis.cedula ?? null;\n\n    if (noExiste) {\n      return [{ json: {\n        ...base,\n        cedula_presente:      true,\n        cedula:               cedulaResuelta,   // ← FIX\n        cliente_existe_bd:    false,\n        tiene_obligaciones:   false,\n        obligaciones:         [],\n        cantidad_obligaciones: 0,\n        ruta_tomada:          'Consultar_BD'\n      }}];\n    }\n\n    return [{ json: {\n      ...base,\n      cedula_presente:       true,\n      cedula:                cedulaResuelta,     // ← FIX\n      nombre_cliente:        primer.nombre_cliente || '',\n      cliente_existe_bd:     true,\n      tiene_obligaciones:    true,\n      obligaciones:          bdItems.map(i => ({\n                               marca:        i.json.Marca              || '',\n                               dias_de_mora: i.json.dias_de_mora       || 0,\n                               saldo:        i.json['Vlr_Saldo total'] || 0\n                             })),\n      cantidad_obligaciones: bdItems.length,\n      ruta_tomada:           'Consultar_BD'\n    }}];\n  }\n} catch(e) {\n  // BD no corrió en esta ejecución → seguimos evaluando rutas\n}\n\n// Ruta 4: Múltiples cédulas\nif (clas.multiples_cedulas === true) {\n  return [{ json: {\n    ...base,\n    cedula:               null,\n    cedula_presente:      false,\n    multiples_cedulas:    true,\n    cedulas_encontradas:  JSON.stringify(clas.cedulas_encontradas ?? []),\n    ruta_tomada:          'Múltiples_Cédulas'\n  }}];\n}\n\n// Ruta 5: Sin cédula (fallback)\nreturn [{ json: {\n  ...base,\n  ruta_tomada: 'Sin_Cédula'\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5072,
+        -272
+      ],
+      "id": "487effc8-ae17-4b8d-8bbd-26a8f4c432e9",
+      "name": "PARSE - Armar Contexto Unificado"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Tipo_mensaje }}",
+                    "rightValue": "=audioMessage",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "64b44e12-2d96-4aac-8d0c-af02dc69fe6e"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Nota_voz"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        1136,
+        -176
+      ],
+      "id": "9e4b8d5e-9fd5-41d3-a58c-d93164e5ca80",
+      "name": "CONTROL - Tipo Mensaje"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bf2c86b0-ab7b-46de-b5ba-5d9360daed79",
+              "name": "instancia",
+              "value": "={{ $('PARSE - Extraer Campos Mensaje').item.json.Instancia }}",
+              "type": "string"
+            },
+            {
+              "id": "9d6315d1-3b67-41aa-8735-240c880e8667",
+              "name": "message_key_id",
+              "value": "={{ $('ENTRADA - WhatsApp Webhook').item.json.body.data.key.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1360,
+        -320
+      ],
+      "id": "2e8923d7-b067-4acd-bc9a-bab2916bb7ed",
+      "name": "PARSE - Extraer Audio"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {
+          "language": "es"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2,
+      "position": [
+        2032,
+        -320
+      ],
+      "id": "a4b1ee6b-d4a6-488b-9bd5-dfd866a26f01",
+      "name": "IA - Transcribir Audio",
+      "credentials": {
+        "openAiApi": {
+          "id": "G8BSBakutWjW1MSX",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evoapi.deveflow.cloud/chat/getBase64FromMediaMessage/{{ $json.instancia }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "evolutionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {\n    \"key\": {\n      \"remoteJid\": \"={{ $('PARSE - Extraer Campos Mensaje').item.json.sender }}\",\n      \"fromMe\": false,\n      \"id\": \"={{ $('PARSE - Extraer Campos Mensaje').item.json.session_id }}\"\n    },\n    \"message\": {{ JSON.stringify($('ENTRADA - WhatsApp Webhook').item.json.body.data.message) }}\n  },\n  \"convertToMp4\": false\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1584,
+        -320
+      ],
+      "id": "e9b6be05-6f46-46da-89df-5ec9512c4933",
+      "name": "HTTP Request",
+      "credentials": {
+        "evolutionApi": {
+          "id": "mMZPJcPFlm7RFmHq",
+          "name": "Evolution account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nodo Code\nconst base64 = $input.first().json.base64;\nconst mimeType = 'audio/ogg'; // WhatsApp usa ogg/opus\n\n// Convertir base64 a Buffer\nconst buffer = Buffer.from(base64, 'base64');\n\nreturn [{\n  json: {\n    sender: $('PARSE - Extraer Campos Mensaje').first().json.sender,\n    Instancia: $('PARSE - Extraer Campos Mensaje').first().json.Instancia,\n    session_id: $('PARSE - Extraer Campos Mensaje').first().json.session_id,\n    mensaje_timestamp: $('PARSE - Extraer Campos Mensaje').first().json.mensaje_timestamp,\n  },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: mimeType,\n      fileName: 'audio.ogg',\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1808,
+        -320
+      ],
+      "id": "0278841b-f22e-4ac7-811c-3a39ba5392f3",
+      "name": "PARSE - Convertir Base64 a Binario"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nodo Code\nconst transcripcion = $input.first().json.text || '';\n\nreturn [{\n  json: {\n    sender:            $('PARSE - Extraer Campos Mensaje').first().json.sender,\n    mensaje:           transcripcion,\n    Instancia:         $('PARSE - Extraer Campos Mensaje').first().json.Instancia,\n    session_id:        $('PARSE - Extraer Campos Mensaje').first().json.session_id,\n    mensaje_timestamp: $('PARSE - Extraer Campos Mensaje').first().json.mensaje_timestamp,\n    Tipo_mensaje:      'audio_transcrito'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        -320
+      ],
+      "id": "93961bce-18bd-4917-b8d3-cb5afc8d304b",
+      "name": "PARSE - Audio a Texto"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fa38873b-d0e2-4e81-af59-64bbe6d3c5f2",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        -176
+      ],
+      "id": "71269c4b-0c42-49b9-9476-38bb5838404d",
+      "name": "ENTRADA - WhatsApp Webhook",
+      "webhookId": "fa38873b-d0e2-4e81-af59-64bbe6d3c5f2"
+    }
+  ],
+  "connections": {
+    "PARSE - Extraer Campos Mensaje": {
+      "main": [
+        [
+          {
+            "node": "CONTROL - Tipo Mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUFFER - Guardar Mensaje en Cola": {
+      "main": [
+        [
+          {
+            "node": "BUFFER - Leer Cola Mensajes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUFFER - Leer Cola Mensajes": {
+      "main": [
+        [
+          {
+            "node": "CONTROL - Evaluar Timing Mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONTROL - Evaluar Timing Mensaje": {
+      "main": [
+        [
+          {
+            "node": "FIN - Ignorar Duplicado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "BUFFER - Limpiar Cola",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CONTROL - Esperar Mensaje Siguiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONTROL - Esperar Mensaje Siguiente": {
+      "main": [
+        [
+          {
+            "node": "BUFFER - Leer Cola Mensajes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUFFER - Limpiar Cola": {
+      "main": [
+        [
+          {
+            "node": "PARSE - Unificar Mensajes del Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PARSE - Unificar Mensajes del Buffer": {
+      "main": [
+        [
+          {
+            "node": "ESTADO - Leer Contexto Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA - Clasificar Intención del Mensaje": {
+      "main": [
+        [
+          {
+            "node": "PARSE - Normalizar Clasificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PARSE - Normalizar Clasificación": {
+      "main": [
+        [
+          {
+            "node": "CONTROL - Enrutar por Intención",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONTROL - Enrutar por Intención": {
+      "main": [
+        [
+          {
+            "node": "PARSE - Armar Contexto Unificado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "BD - Consultar Obligaciones Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PARSE - Armar Contexto Unificado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PARSE - Armar Contexto Unificado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PARSE - Armar Contexto Unificado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BD - Consultar Obligaciones Cliente": {
+      "main": [
+        [
+          {
+            "node": "PARSE - Armar Contexto Unificado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA - Agente Cobranza SUMASPAY": {
+      "main": [
+        [
+          {
+            "node": "ESTADO - Guardar Contexto Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG - Modelo GPT Agente": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "IA - Agente Cobranza SUMASPAY",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG - Memoria Conversacional": {
+      "ai_memory": [
+        [
+          {
+            "node": "IA - Agente Cobranza SUMASPAY",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WA - Simular Escritura": {
+      "main": [
+        [
+          {
+            "node": "WA - Enviar Respuesta Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ESTADO - Leer Contexto Cliente": {
+      "main": [
+        [
+          {
+            "node": "PARSE - Resolver Contexto Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PARSE - Resolver Contexto Cliente": {
+      "main": [
+        [
+          {
+            "node": "IA - Clasificar Intención del Mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ESTADO - Guardar Contexto Cliente": {
+      "main": [
+        [
+          {
+            "node": "ESTADO - Persistir en Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ESTADO - Persistir en Redis": {
+      "main": [
+        [
+          {
+            "node": "ESTADO - Registrar en SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ESTADO - Registrar en SQL": {
+      "main": [
+        [
+          {
+            "node": "WA - Simular Escritura",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PARSE - Armar Contexto Unificado": {
+      "main": [
+        [
+          {
+            "node": "IA - Agente Cobranza SUMASPAY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONTROL - Tipo Mensaje": {
+      "main": [
+        [
+          {
+            "node": "PARSE - Extraer Audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "BUFFER - Guardar Mensaje en Cola",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PARSE - Extraer Audio": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA - Transcribir Audio": {
+      "main": [
+        [
+          {
+            "node": "PARSE - Audio a Texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "PARSE - Convertir Base64 a Binario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PARSE - Convertir Base64 a Binario": {
+      "main": [
+        [
+          {
+            "node": "IA - Transcribir Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PARSE - Audio a Texto": {
+      "main": [
+        [
+          {
+            "node": "BUFFER - Guardar Mensaje en Cola",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ENTRADA - WhatsApp Webhook": {
+      "main": [
+        [
+          {
+            "node": "PARSE - Extraer Campos Mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d2d63babb79971184bb79480f63d2f96210c8ac558281def329c83b3b146245a"
+  }
+}
