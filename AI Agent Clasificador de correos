@@ -1,0 +1,435 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "downloadAttachments": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        192,
+        -128
+      ],
+      "id": "5e974699-7b02-469d-a7fe-7c8789d247c9",
+      "name": "Email Trigger (IMAP)",
+      "credentials": {
+        "imap": {
+          "id": "fslWNbFuEx20hBQA",
+          "name": "notificaciones1@juridicoyprocesos.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// NODO 2: PREPROCESAMIENTO DE CORREO (con enrutamiento WA)\n// ============================================================\n\nconst raw = $input.first().json;\n\n// ── NUEVO: detectar origen y asignar número WhatsApp ────────\nconst origenNodo = $prevNode.name;\n\nconst NUMERO_WHATSAPP = (origenNodo === 'Email Trigger (IMAP)2')\n  ? '573054314251@s.whatsapp.net'\n  : '573159976203@s.whatsapp.net'; // IMAP e IMAP1 → mismo número\n\n// ── Limpieza HTML ───────────────────────────────────────────\nfunction stripHtml(html) {\n  if (!html) return '';\n  return html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/p>/gi, '\\n\\n')\n    .replace(/<[^>]+>/g, '')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\n// ── Radicado único ──────────────────────────────────────────\nfunction generarRadicado() {\n  const now = new Date();\n  const año = now.getFullYear();\n  const mes = String(now.getMonth() + 1).padStart(2, '0');\n  const dia = String(now.getDate()).padStart(2, '0');\n  const hora = String(now.getHours()).padStart(2, '0');\n  const min = String(now.getMinutes()).padStart(2, '0');\n  const seg = String(now.getSeconds()).padStart(2, '0');\n  const rand = Math.floor(Math.random() * 9000) + 1000;\n  return `RAD-${año}${mes}${dia}-${hora}${min}${seg}-${rand}`;\n}\n\n// ── Parsear remitente ───────────────────────────────────────\nfunction parsearRemitente(fromStr) {\n  if (!fromStr) return { nombre: 'Desconocido', email: 'sin-email@desconocido.com' };\n  const match = fromStr.match(/^(.*?)\\s*<([^>]+)>/);\n  if (match) {\n    return {\n      nombre: match[1].replace(/\"/g, '').trim() || 'Sin nombre',\n      email: match[2].trim().toLowerCase()\n    };\n  }\n  const emailMatch = fromStr.match(/[\\w.-]+@[\\w.-]+\\.\\w+/);\n  return {\n    nombre: fromStr.trim(),\n    email: emailMatch ? emailMatch[0] : fromStr.trim()\n  };\n}\n\n// ── Adjuntos ────────────────────────────────────────────────\nconst adjuntos = raw.attachments || [];\nconst tieneAdjuntos = adjuntos.length > 0;\nconst tiposAdjuntos = adjuntos.map(a => ({\n  nombre: a.filename || 'sin-nombre',\n  tipo: a.contentType || 'application/octet-stream',\n  tamaño: a.size || 0\n}));\n\n// ── Cuerpo ──────────────────────────────────────────────────\nconst cuerpoHtml = raw.html || '';\nconst cuerpoTexto = raw.text || stripHtml(cuerpoHtml);\nconst cuerpoLimpio = cuerpoTexto.substring(0, 8000);\n\nconst remitente = parsearRemitente(raw.from);\n\n// ── Output ──────────────────────────────────────────────────\nreturn [{\n  json: {\n    radicado_id:            generarRadicado(),\n    message_id:             raw.messageId || '',\n    fecha_recepcion:        raw.date || new Date().toISOString(),\n    asunto:                 raw.subject || '(Sin asunto)',\n    remitente_nombre:       remitente.nombre,\n    remitente_email:        remitente.email,\n    cuerpo_limpio:          cuerpoLimpio,\n    cuerpo_html_original:   cuerpoHtml.substring(0, 50000),\n    tiene_adjuntos:         tieneAdjuntos,\n    cantidad_adjuntos:      adjuntos.length,\n    adjuntos_detalle:       JSON.stringify(tiposAdjuntos),\n\n    // ── NUEVO ──────────────────────────────────────────────\n    cuenta_origen:          origenNodo,\n    numero_whatsapp_destino: NUMERO_WHATSAPP,\n\n    input_para_ia: `ASUNTO: ${raw.subject || '(Sin asunto)'}\nREMITENTE: ${raw.from || 'Desconocido'}\nFECHA: ${raw.date || new Date().toISOString()}\nTIENE ADJUNTOS: ${tieneAdjuntos ? 'SÍ - ' + tiposAdjuntos.map(a => a.nombre).join(', ') : 'NO'}\n\nCUERPO DEL CORREO:\n${cuerpoLimpio}`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        -128
+      ],
+      "id": "88c22416-2b6a-49fe-a3fb-c0e146d21a5a",
+      "name": "PREPROCESAMIENTO DE CORREO"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{$json.input_para_ia}}",
+        "options": {
+          "systemMessage": "INSTRUCCIÓN CRÍTICA DE FORMATO: Tu respuesta debe ser ÚNICAMENTE el objeto JSON. \nNo incluyas ningún texto antes ni después del JSON. No uses bloques de código markdown. \nNo escribas \"Aquí está\", \"Análisis:\", ni ninguna frase introductoria. \nComienza directamente con { y termina con }.\nEres un experto asistente jurídico especializado en derecho administrativo colombiano. Tu función es analizar correos electrónicos recibidos por una entidad pública o privada y clasificarlos con precisión, extraer información clave y generar una respuesta formal preliminar. Debes ser meticuloso, formal y aplicar el conocimiento del ordenamiento jurídico colombiano.\n\n## TIPOS DE DOCUMENTOS QUE DEBES IDENTIFICAR\n\n1. **TUTELA**: Mecanismo constitucional de protección de derechos fundamentales (Art. 86 CP). Palabras clave: \"derecho fundamental\", \"vulneración\", \"amparo\", \"tutela\", \"acción de tutela\", \"juez constitucional\", \"derechos fundamentales vulnerados\". Término legal: 10 días hábiles para respuesta del accionado (Decreto 2591/1991, Art. 16).\n\n2. **DERECHO_DE_PETICION**: Derecho fundamental consagrado en el Art. 23 CP y Ley 1755/2015. Palabras clave: \"derecho de petición\", \"respetuosamente solicito\", \"en ejercicio del derecho de petición\", \"me permito solicitar\". Término legal: 15 días hábiles para respuesta de fondo. Si es información: 10 días hábiles.\n\n3. **QUEJA**: Manifestación de insatisfacción sobre el servicio prestado. Palabras clave: \"queja\", \"inconformidad\", \"mal servicio\", \"deficiente atención\", \"incumplimiento\", \"inconformismo\", \"pésimo\". Término legal: 15 días hábiles (Estatuto del Consumidor / normativa sectorial).\n\n4. **RECURSO_REPOSICION**: Recurso gubernativo contra actos administrativos (CPACA, Art. 74). Palabras clave: \"recurso de reposición\", \"interpongo recurso\", \"acto administrativo\", \"decisión administrativa\", \"revocatoria\", \"impugno\". Término legal: 10 días hábiles para resolver.\n\n5. **RECURSO_APELACION**: Recurso ante el superior jerárquico (CPACA, Art. 74). Palabras clave similares al anterior más \"apelación\", \"superior jerárquico\", \"segunda instancia\".\n\n6. **SOLICITUD_ADMINISTRATIVA**: Petición general sin carácter de queja o recurso. Término legal: 30 días hábiles.\n\n7. **NOTIFICACION_JUDICIAL**: Comunicación de un juzgado, tribunal o autoridad judicial. Palabras clave: \"juzgado\", \"tribunal\", \"Corte\", \"notificación\", \"emplazamiento\", \"auto\", \"sentencia\", \"providencia\", \"demanda\", \"expediente No.\".\n\n8. **OTRO**: Cualquier comunicación que no encaje en las categorías anteriores.\n\n## EVALUACIÓN DE URGENCIA\n\n- **CRÍTICA (nivel 1)**: Tutelas y notificaciones judiciales. Requieren acción INMEDIATA. El incumplimiento puede generar desacato, multas y sanciones disciplinarias.\n- **ALTA (nivel 2)**: Derechos de petición y recursos de reposición/apelación. Términos constitucionales y legales perentorios.\n- **MEDIA (nivel 3)**: Quejas formales y solicitudes con términos definidos por normativa especial.\n- **BAJA (nivel 4)**: Consultas generales, solicitudes de información sin carácter urgente, correos informativos.\n\n## IDENTIFICACIÓN DE ENTIDAD REMITENTE\n\nClasifica el remitente en:\n- **JUZGADO_TRIBUNAL**: Organismos judiciales (Juzgado, Tribunal, Corte)\n- **ENTIDAD_GUBERNAMENTAL**: Ministerios, secretarías, alcaldías, gobernaciones, DIAN, INVIMA, etc.\n- **PERSONA_NATURAL**: Ciudadano individual\n- **PERSONA_JURIDICA_PRIVADA**: Empresa, sociedad, corporación\n- **DEFENSOR_PUEBLO**: Defensoría del Pueblo, personerías\n- **PROCURADURIA**: Procuraduría General de la Nación, procuradurías regionales\n- **DESCONOCIDO**: No se puede determinar\n\n## DETECCIÓN DE TÉRMINOS LEGALES\n\nBusca activamente:\n- Fechas límite explícitas mencionadas en el cuerpo\n- Frases como \"en el término de\", \"dentro de los siguientes X días\", \"a más tardar el\"\n- Referencias a términos legales vencidos: \"han transcurrido X días\", \"sin obtener respuesta\", \"vencido el plazo\"\n- Indicios de reincidencia: \"segunda comunicación\", \"reiteramos\", \"insistimos\"\n\nSi detectas indicios de término vencido, márcalo como URGENCIA CRÍTICA independientemente del tipo de documento.\n\n## FORMATO DE RESPUESTA\n\nDebes responder EXCLUSIVAMENTE en formato JSON válido, sin texto adicional antes o después. Estructura:\n\n{\n  \"tipo_documento\": \"TUTELA|DERECHO_DE_PETICION|QUEJA|RECURSO_REPOSICION|RECURSO_APELACION|SOLICITUD_ADMINISTRATIVA|NOTIFICACION_JUDICIAL|OTRO\",\n  \"urgencia\": \"CRÍTICA|ALTA|MEDIA|BAJA\",\n  \"nivel_urgencia_numerico\": 1,\n  \"remitente_nombre\": \"nombre completo del remitente\",\n  \"remitente_email\": \"email del remitente\",\n  \"entidad_tipo\": \"JUZGADO_TRIBUNAL|ENTIDAD_GUBERNAMENTAL|PERSONA_NATURAL|PERSONA_JURIDICA_PRIVADA|DEFENSOR_PUEBLO|PROCURADURIA|DESCONOCIDO\",\n  \"hechos_clave\": [\n    \"Hecho 1: descripción concreta y objetiva\",\n    \"Hecho 2: descripción concreta y objetiva\",\n    \"Hecho 3: descripción concreta y objetiva\"\n  ],\n  \"terminos_legales_detectados\": \"Descripción de términos encontrados o 'No se detectaron términos específicos'\",\n  \"termino_vencido_detectado\": false,\n  \"area_responsable\": \"Legal|Gerencia|Atención al Ciudadano|Financiero|Operaciones|PQRS\",\n  \"respuesta_sugerida\": \"Texto completo de la respuesta formal sugerida en español jurídico colombiano, con membrete implícito, saludo formal, cuerpo respondiendo cada punto planteado, y despedida formal. Mínimo 3 párrafos.\",\n  \"resumen_ejecutivo\": \"Resumen de máximo 3 oraciones para comunicación interna: qué pide, quién lo pide, qué se debe hacer y en qué plazo.\"\n}\n\n## EJEMPLOS DE CLASIFICACIÓN\n\n**Ejemplo 1 — Tutela:**\nAsunto: \"Acción de tutela - vulneración derecho a la salud\"\nCuerpo: \"...mediante la presente interpongo ACCIÓN DE TUTELA contra esa entidad por la vulneración de mi derecho fundamental a la salud, toda vez que llevo 3 meses esperando autorización para cirugía...\"\n→ tipo_documento: \"TUTELA\", urgencia: \"CRÍTICA\", nivel: 1, area: \"Legal\"\n\n**Ejemplo 2 — Derecho de petición con término vencido:**\nAsunto: \"Segunda solicitud - derecho de petición\"\nCuerpo: \"...En ejercicio del derecho de petición, y habiendo transcurrido ya 20 días hábiles sin obtener respuesta a mi solicitud del pasado 15 de enero...\"\n→ tipo_documento: \"DERECHO_DE_PETICION\", urgencia: \"CRÍTICA\" (por término vencido), nivel: 1, termino_vencido_detectado: true\n\n**Ejemplo 3 — Queja:**\nAsunto: \"Queja por mal servicio en sucursal norte\"\nCuerpo: \"...quiero manifestar mi inconformidad con la atención recibida el día de ayer en sus instalaciones...\"\n→ tipo_documento: \"QUEJA\", urgencia: \"MEDIA\", nivel: 3, area: \"Atención al Ciudadano\"\n\n**Ejemplo 4 — Notificación judicial:**\nAsunto: \"Notificación - Proceso No. 2024-0123 - Juzgado 5 Civil\"\nCuerpo: \"...mediante el presente escrito, el Juzgado Quinto Civil del Circuito de Bogotá se permite notificar...\"\n→ tipo_documento: \"NOTIFICACION_JUDICIAL\", urgencia: \"CRÍTICA\", nivel: 1, entidad_tipo: \"JUZGADO_TRIBUNAL\"\n\n## INSTRUCCIONES ADICIONALES\n\n- Si el correo está en inglés, clasifícalo igualmente pero redacta la respuesta en español.\n- Si el cuerpo está vacío o es ilegible, clasifica como OTRO con urgencia BAJA y describe el problema en resumen_ejecutivo.\n- Nunca inventes información que no esté en el correo. Si algo es incierto, indícalo explícitamente.\n- La respuesta_sugerida debe ser formal, usar \"Distinguido señor/señora\" o \"Apreciado/a ciudadano/a\" según contexto, y citar los artículos legales aplicables.\n- Para tutelas, la respuesta debe incluir la referencia al Decreto 2591 de 1991 y el compromiso de respuesta dentro del término legal.\n- Detecta si hay números de radicado, expedientes o referencias a comunicaciones previas y menciónalos en hechos_clave."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        640,
+        64
+      ],
+      "id": "f5b0b44f-d193-4b74-9649-527bc355cb44",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        640,
+        240
+      ],
+      "id": "4b101886-3e84-4dd4-8611-11d065ed7643",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "G8BSBakutWjW1MSX",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.nivel_urgencia_numerico }}",
+                    "rightValue": 1,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    },
+                    "id": "fc10207b-c3c8-42aa-95d3-c74fff87b8e6"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CRÍTICA"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "5f0beb45-215a-4b64-b9c2-2efe6ad36d70",
+                    "leftValue": "={{ $json.nivel_urgencia_numerico }}",
+                    "rightValue": 2,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ALTA"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "bcc06d4f-e190-4749-8b5d-8ab94fa94bb6",
+                    "leftValue": "={{ $json.nivel_urgencia_numerico }}",
+                    "rightValue": 3,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "MEDIA"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "30799804-f954-4e92-9bb8-55c776de69df",
+                    "leftValue": "={{ $json.nivel_urgencia_numerico }}",
+                    "rightValue": 4,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "BAJA"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": 2
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        1216,
+        32
+      ],
+      "id": "aa3e1d12-70ec-4fd3-be71-adca16e59c76",
+      "name": "Switch de Urgencia"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst pre = $input.first().json;;\n\nconst outputStr = raw.output || '{}';\n\nlet respuesta;\ntry {\n  const limpio = outputStr\n    .replace(/```json/gi, '')\n    .replace(/```/g, '')\n    .replace(/^[^{]*({[\\s\\S]*})[^}]*$/, '$1')  // extrae solo el JSON aunque haya texto antes/después\n    .trim();\n  respuesta = JSON.parse(limpio);\n} catch(e) {\n  respuesta = {\n    tipo_documento: 'OTRO',\n    urgencia: 'MEDIA',\n    nivel_urgencia_numerico: 3,\n    entidad_tipo: 'DESCONOCIDO',\n    hechos_clave: ['Error al parsear respuesta IA - revisión manual requerida'],\n    terminos_legales_detectados: 'No determinado',\n    termino_vencido_detectado: false,\n    area_responsable: 'Legal',\n    respuesta_sugerida: 'En proceso de clasificación manual.',\n    resumen_ejecutivo: 'Correo recibido - clasificación automática falló'\n  };\n}\n\n// Validar que nivel_urgencia_numerico sea 1-4\nconst nivel = parseInt(respuesta.nivel_urgencia_numerico);\nconst nivelValido = (nivel >= 1 && nivel <= 4) ? nivel : 3;\n\nreturn [{\n  json: {\n    radicado_id:              pre.radicado_id              || '',\n    message_id:               pre.message_id               || '',\n    fecha_recepcion:          pre.fecha_recepcion          || '',\n    asunto:                   pre.asunto                   || '',\n    remitente_nombre:         pre.remitente_nombre         || '',\n    remitente_email:          pre.remitente_email          || '',\n    tiene_adjuntos:           pre.tiene_adjuntos           || false,\n    cantidad_adjuntos:        pre.cantidad_adjuntos        || 0,\n    adjuntos_detalle:         pre.adjuntos_detalle         || '[]',\n    cuenta_origen:            pre.cuenta_origen            || '',\n    numero_whatsapp_destino:  pre.numero_whatsapp_destino  || '573159976203@s.whatsapp.net',\n\n    ...respuesta,\n\n    nivel_urgencia_numerico: nivelValido,\n\n    hechos_clave_texto: Array.isArray(respuesta.hechos_clave)\n      ? respuesta.hechos_clave.join('\\n• ')\n      : String(respuesta.hechos_clave || '')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        64
+      ],
+      "id": "a8a1d8ae-69f6-423b-a08c-3962db5e6957",
+      "name": "Parsear Respuesta IA"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "vico",
+        "remoteJid": "={{ $json.numero_whatsapp_destino  }}",
+        "messageText": "={{    '🔔 *NUEVO CORREO LEGAL RECIBIDO*\\n\\n' +   '📧 *De:* ' + $json.remitente_nombre + ' <' + $json.remitente_email + '>\\n' +   '📋 *Tipo:* ' + $json.tipo_documento + '\\n' +   '⚠️ *Urgencia:* ' + $json.urgencia + '\\n' +   '🏢 *Área:* ' + $json.area_responsable + '\\n\\n' +   '📝 *Hechos Clave:*\\n• ' + $json.hechos_clave_texto + '\\n\\n' +   '⏰ *Términos Legales:* ' + $json.terminos_legales_detectados + '\\n\\n' +   '💬 *Respuesta sugerida (extracto):*\\n' + ($json.respuesta_sugerida || '').substring(0, 500) + '...\\n\\n' +   '🆔 *Radicado:* ' + $json.radicado_id + '\\n' +   '📅 *Recibido:* ' + $json.fecha_recepcion + '\\n' +   '📎 *Adjuntos:* ' + ($json.tiene_adjuntos ? 'SÍ (' + $json.cantidad_adjuntos + ')' : 'No') +   ($json.nivel_urgencia_numerico === 1 ? '\\n\\n🚨🚨🚨 *ACCIÓN INMEDIATA REQUERIDA - TUTELA* 🚨🚨🚨' : '')   }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1456,
+        64
+      ],
+      "id": "f13b7831-1740-4aca-89cc-ea42acf756d5",
+      "name": "Enviar texto",
+      "credentials": {
+        "evolutionApi": {
+          "id": "mMZPJcPFlm7RFmHq",
+          "name": "Evolution account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "downloadAttachments": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        192,
+        64
+      ],
+      "id": "aeaa966f-3a0d-47c8-b9e3-084523177bee",
+      "name": "Email Trigger (IMAP)1",
+      "credentials": {
+        "imap": {
+          "id": "gdmU0gU7q7hAI0U6",
+          "name": "juridicobpo@agoraae.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "downloadAttachments": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        192,
+        256
+      ],
+      "id": "209d26a1-a9a6-480e-a42a-6989231c738f",
+      "name": "Email Trigger (IMAP)2",
+      "credentials": {
+        "imap": {
+          "id": "bGnQRcN7v9cFD1mL",
+          "name": "notificacionesjuridicas@arealegalbpo.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// NODO 2: PREPROCESAMIENTO DE CORREO (con enrutamiento WA)\n// ============================================================\n\nconst raw = $input.first().json;\n\n// ── NUEVO: detectar origen y asignar número WhatsApp ────────\nconst origenNodo = $prevNode.name;\n\nconst NUMERO_WHATSAPP = (origenNodo === 'Email Trigger (IMAP)2')\n  ? '573054314251@s.whatsapp.net'\n  : '573159976203@s.whatsapp.net'; // IMAP e IMAP1 → mismo número\n\n// ── Limpieza HTML ───────────────────────────────────────────\nfunction stripHtml(html) {\n  if (!html) return '';\n  return html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/p>/gi, '\\n\\n')\n    .replace(/<[^>]+>/g, '')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\n// ── Radicado único ──────────────────────────────────────────\nfunction generarRadicado() {\n  const now = new Date();\n  const año = now.getFullYear();\n  const mes = String(now.getMonth() + 1).padStart(2, '0');\n  const dia = String(now.getDate()).padStart(2, '0');\n  const hora = String(now.getHours()).padStart(2, '0');\n  const min = String(now.getMinutes()).padStart(2, '0');\n  const seg = String(now.getSeconds()).padStart(2, '0');\n  const rand = Math.floor(Math.random() * 9000) + 1000;\n  return `RAD-${año}${mes}${dia}-${hora}${min}${seg}-${rand}`;\n}\n\n// ── Parsear remitente ───────────────────────────────────────\nfunction parsearRemitente(fromStr) {\n  if (!fromStr) return { nombre: 'Desconocido', email: 'sin-email@desconocido.com' };\n  const match = fromStr.match(/^(.*?)\\s*<([^>]+)>/);\n  if (match) {\n    return {\n      nombre: match[1].replace(/\"/g, '').trim() || 'Sin nombre',\n      email: match[2].trim().toLowerCase()\n    };\n  }\n  const emailMatch = fromStr.match(/[\\w.-]+@[\\w.-]+\\.\\w+/);\n  return {\n    nombre: fromStr.trim(),\n    email: emailMatch ? emailMatch[0] : fromStr.trim()\n  };\n}\n\n// ── Adjuntos ────────────────────────────────────────────────\nconst adjuntos = raw.attachments || [];\nconst tieneAdjuntos = adjuntos.length > 0;\nconst tiposAdjuntos = adjuntos.map(a => ({\n  nombre: a.filename || 'sin-nombre',\n  tipo: a.contentType || 'application/octet-stream',\n  tamaño: a.size || 0\n}));\n\n// ── Cuerpo ──────────────────────────────────────────────────\nconst cuerpoHtml = raw.html || '';\nconst cuerpoTexto = raw.text || stripHtml(cuerpoHtml);\nconst cuerpoLimpio = cuerpoTexto.substring(0, 8000);\n\nconst remitente = parsearRemitente(raw.from);\n\n// ── Output ──────────────────────────────────────────────────\nreturn [{\n  json: {\n    radicado_id:            generarRadicado(),\n    message_id:             raw.messageId || '',\n    fecha_recepcion:        raw.date || new Date().toISOString(),\n    asunto:                 raw.subject || '(Sin asunto)',\n    remitente_nombre:       remitente.nombre,\n    remitente_email:        remitente.email,\n    cuerpo_limpio:          cuerpoLimpio,\n    cuerpo_html_original:   cuerpoHtml.substring(0, 50000),\n    tiene_adjuntos:         tieneAdjuntos,\n    cantidad_adjuntos:      adjuntos.length,\n    adjuntos_detalle:       JSON.stringify(tiposAdjuntos),\n\n    // ── NUEVO ──────────────────────────────────────────────\n    cuenta_origen:          origenNodo,\n    numero_whatsapp_destino: NUMERO_WHATSAPP,\n\n    input_para_ia: `ASUNTO: ${raw.subject || '(Sin asunto)'}\nREMITENTE: ${raw.from || 'Desconocido'}\nFECHA: ${raw.date || new Date().toISOString()}\nTIENE ADJUNTOS: ${tieneAdjuntos ? 'SÍ - ' + tiposAdjuntos.map(a => a.nombre).join(', ') : 'NO'}\n\nCUERPO DEL CORREO:\n${cuerpoLimpio}`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        64
+      ],
+      "id": "c4f1a8ba-f6a4-4c25-a56f-ecd976ce715a",
+      "name": "PREPROCESAMIENTO DE CORREO1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// NODO 2: PREPROCESAMIENTO DE CORREO (con enrutamiento WA)\n// ============================================================\n\nconst raw = $input.first().json;\n\n// ── NUEVO: detectar origen y asignar número WhatsApp ────────\nconst origenNodo = $prevNode.name;\n\nconst NUMERO_WHATSAPP = (origenNodo === 'Email Trigger (IMAP)2')\n  ? '573054314251@s.whatsapp.net'\n  : '573159976203@s.whatsapp.net'; // IMAP e IMAP1 → mismo número\n\n// ── Limpieza HTML ───────────────────────────────────────────\nfunction stripHtml(html) {\n  if (!html) return '';\n  return html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/p>/gi, '\\n\\n')\n    .replace(/<[^>]+>/g, '')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\n// ── Radicado único ──────────────────────────────────────────\nfunction generarRadicado() {\n  const now = new Date();\n  const año = now.getFullYear();\n  const mes = String(now.getMonth() + 1).padStart(2, '0');\n  const dia = String(now.getDate()).padStart(2, '0');\n  const hora = String(now.getHours()).padStart(2, '0');\n  const min = String(now.getMinutes()).padStart(2, '0');\n  const seg = String(now.getSeconds()).padStart(2, '0');\n  const rand = Math.floor(Math.random() * 9000) + 1000;\n  return `RAD-${año}${mes}${dia}-${hora}${min}${seg}-${rand}`;\n}\n\n// ── Parsear remitente ───────────────────────────────────────\nfunction parsearRemitente(fromStr) {\n  if (!fromStr) return { nombre: 'Desconocido', email: 'sin-email@desconocido.com' };\n  const match = fromStr.match(/^(.*?)\\s*<([^>]+)>/);\n  if (match) {\n    return {\n      nombre: match[1].replace(/\"/g, '').trim() || 'Sin nombre',\n      email: match[2].trim().toLowerCase()\n    };\n  }\n  const emailMatch = fromStr.match(/[\\w.-]+@[\\w.-]+\\.\\w+/);\n  return {\n    nombre: fromStr.trim(),\n    email: emailMatch ? emailMatch[0] : fromStr.trim()\n  };\n}\n\n// ── Adjuntos ────────────────────────────────────────────────\nconst adjuntos = raw.attachments || [];\nconst tieneAdjuntos = adjuntos.length > 0;\nconst tiposAdjuntos = adjuntos.map(a => ({\n  nombre: a.filename || 'sin-nombre',\n  tipo: a.contentType || 'application/octet-stream',\n  tamaño: a.size || 0\n}));\n\n// ── Cuerpo ──────────────────────────────────────────────────\nconst cuerpoHtml = raw.html || '';\nconst cuerpoTexto = raw.text || stripHtml(cuerpoHtml);\nconst cuerpoLimpio = cuerpoTexto.substring(0, 8000);\n\nconst remitente = parsearRemitente(raw.from);\n\n// ── Output ──────────────────────────────────────────────────\nreturn [{\n  json: {\n    radicado_id:            generarRadicado(),\n    message_id:             raw.messageId || '',\n    fecha_recepcion:        raw.date || new Date().toISOString(),\n    asunto:                 raw.subject || '(Sin asunto)',\n    remitente_nombre:       remitente.nombre,\n    remitente_email:        remitente.email,\n    cuerpo_limpio:          cuerpoLimpio,\n    cuerpo_html_original:   cuerpoHtml.substring(0, 50000),\n    tiene_adjuntos:         tieneAdjuntos,\n    cantidad_adjuntos:      adjuntos.length,\n    adjuntos_detalle:       JSON.stringify(tiposAdjuntos),\n\n    // ── NUEVO ──────────────────────────────────────────────\n    cuenta_origen:          origenNodo,\n    numero_whatsapp_destino: NUMERO_WHATSAPP,\n\n    input_para_ia: `ASUNTO: ${raw.subject || '(Sin asunto)'}\nREMITENTE: ${raw.from || 'Desconocido'}\nFECHA: ${raw.date || new Date().toISOString()}\nTIENE ADJUNTOS: ${tieneAdjuntos ? 'SÍ - ' + tiposAdjuntos.map(a => a.nombre).join(', ') : 'NO'}\n\nCUERPO DEL CORREO:\n${cuerpoLimpio}`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        256
+      ],
+      "id": "10e86ac8-4ad4-4994-9eca-0720fc4469af",
+      "name": "PREPROCESAMIENTO DE CORREO2"
+    }
+  ],
+  "connections": {
+    "Email Trigger (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "PREPROCESAMIENTO DE CORREO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPROCESAMIENTO DE CORREO": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parsear Respuesta IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch de Urgencia": {
+      "main": [
+        [
+          {
+            "node": "Enviar texto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar texto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar texto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Respuesta IA": {
+      "main": [
+        [
+          {
+            "node": "Switch de Urgencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Trigger (IMAP)1": {
+      "main": [
+        [
+          {
+            "node": "PREPROCESAMIENTO DE CORREO1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Trigger (IMAP)2": {
+      "main": [
+        [
+          {
+            "node": "PREPROCESAMIENTO DE CORREO2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPROCESAMIENTO DE CORREO1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPROCESAMIENTO DE CORREO2": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d2d63babb79971184bb79480f63d2f96210c8ac558281def329c83b3b146245a"
+  }
+}
